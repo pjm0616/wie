@@ -1,12 +1,4 @@
-use std::{
-    cell::{RefCell, RefMut},
-    collections::HashMap,
-    fmt::Debug,
-    future::Future,
-    pin::Pin,
-    rc::Rc,
-    task::{Context, Poll},
-};
+use std::{cell::{RefCell, RefMut}, collections::HashMap, fmt::Debug, future::Future, pin::Pin, rc::Rc, task::{Context, Poll}};
 
 use futures::task::noop_waker;
 
@@ -180,13 +172,19 @@ impl Executor {
             match task.fut.as_mut().poll(&mut context) {
                 Poll::Ready(x) => {
                     if x.is_err() {
-                        return Err(x
-                            .map_err(|x| {
-                                let reg_stack = self.inner.borrow_mut().module.core_mut().dump_reg_stack();
-
-                                anyhow::anyhow!("{}\n{}", x, reg_stack)
-                            })
-                            .unwrap_err());
+                        let reg_stack = self.inner.borrow_mut().module.core_mut().dump_reg_stack();
+                        if false { // debug
+                            tracing::error!("{}\n{}", x.err().unwrap(), reg_stack);
+                            sleeping_tasks.remove(&task_id);
+                            next_tasks.remove(&task_id);
+                            task.context = self.inner.borrow_mut().module.core_mut().save_context();
+                        } else {
+                            return Err(x
+                                .map_err(move |x| {
+                                    anyhow::anyhow!("{}\n{}", x, reg_stack)
+                                })
+                                .unwrap_err());
+                        }
                     }
                 }
                 Poll::Pending => {
