@@ -1,6 +1,6 @@
 use std::{io::Cursor, ops::Deref};
 
-use image::{imageops, io::Reader as ImageReader, GenericImageView, RgbaImage};
+use image::{imageops, io::Reader as ImageReader, GenericImageView, Rgba, RgbaImage};
 use imageproc::{drawing::draw_filled_rect_mut, rect::Rect};
 
 pub struct Color {
@@ -13,6 +13,20 @@ pub struct Color {
 impl Color {
     pub fn new(r: u8, g: u8, b: u8, a: u8) -> Self {
         Self { r, g, b, a }
+    }
+
+    pub fn from_argb8888(v: u32) -> Self {
+        let a = ((v >> 24) & 0xff) as u8;
+        let r = ((v >> 16) & 0xff) as u8;
+        let g = ((v >> 8) & 0xff) as u8;
+        let b = (v & 0xff) as u8;
+        Self::new(r, g, b, a)
+    }
+}
+
+impl From<Color> for Rgba<u8> {
+    fn from(c: Color) -> Self {
+        Self([c.r, c.g, c.b, c.a])
     }
 }
 
@@ -77,6 +91,10 @@ impl Canvas {
         let color = image::Rgba([color.r, color.g, color.b, color.a]);
 
         draw_filled_rect_mut(&mut self.image.image, rect, color);
+    }
+
+    pub fn put_pixel(&mut self, x: u32, y: u32, color: Color) {
+        self.image.image.put_pixel(x, y, color.into());
     }
 }
 
