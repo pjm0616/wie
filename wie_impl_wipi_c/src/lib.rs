@@ -4,6 +4,7 @@
 extern crate alloc;
 
 mod base;
+mod error;
 pub mod r#impl;
 mod method;
 
