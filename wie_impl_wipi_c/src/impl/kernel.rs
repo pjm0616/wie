@@ -1,10 +1,12 @@
+use alloc::borrow::Cow;
 use alloc::{boxed::Box, string::String, vec, vec::Vec};
 use core::{cell::Ref, iter};
 
 use bytemuck::{Pod, Zeroable};
 
-use wie_base::util::{read_generic, write_generic};
+use wie_base::util::{read_generic, read_null_terminated_string, write_generic, write_null_terminated_string};
 
+use crate::error::WIPICErrorCode;
 use crate::{
     base::{WIPICContext, WIPICError, WIPICMemoryId, WIPICMethodBody, WIPICResult, WIPICWord},
     method::{MethodBody, MethodImpl},
@@ -35,10 +37,64 @@ async fn current_time(context: &mut dyn WIPICContext) -> WIPICResult<WIPICWord> 
     Ok(context.backend().time().now().raw() as WIPICWord)
 }
 
-async fn get_system_property(_context: &mut dyn WIPICContext, p_id: WIPICWord, p_out: WIPICWord, buf_size: WIPICWord) -> WIPICResult<i32> {
-    tracing::warn!("stub MC_knlGetSystemProperty({:#x}, {:#x}, {})", p_id, p_out, buf_size);
+async fn get_system_property(context: &mut dyn WIPICContext, p_id: WIPICWord, p_out: WIPICWord, buf_size: WIPICWord) -> WIPICResult<WIPICErrorCode> {
+    let property_name = read_null_terminated_string(context, p_id)?;
+    tracing::trace!("MC_knlGetSystemProperty({}(@{:#x}), {:#x}, {})", &property_name, p_id, p_out, buf_size);
 
-    Ok(0)
+    let result: Cow<str> = match property_name.as_str() {
+        "ESN" => "01234567891".into(),             // CDMA Electronic Serial Number
+        "NID" => "65535".into(),                   // CDMA Network Identification
+        "SID" => "2236".into(),                    // CDMA System Identification
+        "BASEID" => "".into(),                     // Base Station Identification
+        "BASELAT" => "37.358794639155875".into(),  // Base Station Latitude (@KT Headquarters)
+        "BASELONG" => "127.11491625337496".into(), // Base Station Longitude (@KT Headquarters)
+        "CURRENTCH" => "779".into(),               // Current Channel Number
+        "PHONENUMBER" => "01612345678".into(),     // Phone Number
+        "RSSILEVEL" => "5".into(),                 // Signal strength icon in the top status bar
+        "MAXRSSILEVEL" => "5".into(),              // Signal strength icon in the top status bar
+        "BATTERYLEVEL" => "5".into(),              // Battery percentage icon in the top status bar
+        "MAXBATTLEVEL" => "5".into(),              // Battery percentage icon in the top status bar
+        "MAXSERIALNUM" => "0".into(),
+        "MAXSOCKETNUM" => "64".into(),
+        "MEDIADEVICES" => {
+            let supported_types = ["audio/MP3"];
+            if supported_types.is_empty() {
+                return Ok(WIPICErrorCode::NOTSUP);
+            }
+            supported_types.join(",").into()
+        }
+        "DNS" => "127.0.0.1".into(),
+        "TIMEZONE" => "GMT+09:00".into(),
+        "PHONEMODEL" => "wie".into(),
+        "KEYREPEAT" => {
+            // “반복시작시간:반복주기시간”, 단위는 ms이다.
+            return Ok(WIPICErrorCode::NOTSUP);
+        }
+        "VIBRATORLEVEL" => "100".into(), // fixme: hardcoded value
+        "VOLUMELEVEL" => "100".into(),   // fixme: hardcoded value
+        "ANNUN_CALL" | "ANNUN_SMS" | "ANNUN_SILENT" | "ANNUN_ALARM" | "ANNUN_SECURITY" => {
+            // Setting "1" or "0" will show/hide the relevant icon in the top status bar.
+            "0".into()
+        }
+        _ => {
+            tracing::warn!(
+                "MC_knlGetSystemProperty({}(@{:#x}), {:#x}, {}): Got unknown property value {}, returning M_E_INVALID",
+                &property_name,
+                p_id,
+                p_out,
+                buf_size,
+                &property_name
+            );
+            return Ok(WIPICErrorCode::INVALID);
+        }
+    };
+
+    if (buf_size as usize) < result.len() + 1 {
+        return Ok(WIPICErrorCode::SHORTBUF);
+    }
+    write_null_terminated_string(context, p_out, result.as_ref())?;
+
+    Ok(WIPICErrorCode::SUCCESS)
 }
 
 async fn def_timer(context: &mut dyn WIPICContext, ptr_timer: WIPICWord, fn_callback: WIPICWord) -> WIPICResult<()> {
